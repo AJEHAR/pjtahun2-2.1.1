@@ -9,8 +9,12 @@
      (Murid hanya tulis nama samaran; tiada e-mel/kata laluan.)
   3. Firebase Console → Firestore → cipta dokumen games/pj2-kenal-kawasan
      (contoh medan: nama "Jom Jalan! Kenali Kawasan", subjek "PJ", tahun 2).
-  4. Hoskan fail ini (Firebase Hosting / localhost). Jika domain lain,
-     tambah di Authentication → Settings → Authorized domains.
+  4. Hoskan folder ini (GitHub Pages). Tambah domain NAMA-ANDA.github.io di
+     Authentication → Settings → Authorized domains.
+  5. SUARA: buka rakam-suara.html, rakam semua ayat, muat turun zip, kemudian
+     letak fail .wav ke dalam folder audio/. Game hanya guna suara Bahasa Melayu:
+     rakaman guru dahulu, kemudian suara pelayar Melayu (ms-MY) jika ada.
+     Suara Indonesia/Inggeris tidak digunakan langsung.
   Soalan sudah terbina dalam game, jadi koleksi questions tidak diperlukan.
   Security Rules sedia ada TIDAK perlu diubah.
 
@@ -71,6 +75,7 @@ input#nama:focus{border-color:var(--primary)}
 .btn.kedua{background:#fff;color:var(--ink);border:3px solid var(--line);box-shadow:0 6px 0 var(--line)}
 .ralat{color:var(--bad);font-weight:700;min-height:1.5em;margin-top:10px}
 .nota{margin-top:14px;font-size:.98rem;color:var(--muted);background:#fbf6ec;border-radius:14px;padding:10px 14px 6px;text-align:left}
+.nota.ok{background:var(--ok-bg);color:#16784a}
 
 /* Skrin main */
 .kemajuan{display:flex;gap:6px;margin-bottom:12px}
@@ -188,6 +193,7 @@ th{color:var(--muted)}
       <div class="nota" id="nota-demo" style="display:none">
         <b>Mod demo:</b> firebaseConfig belum diisi, jadi skor tidak disimpan ke database. Isi konfigurasi dalam fail ini untuk simpan skor.
       </div>
+      <div class="nota" id="status-suara"></div>
     </div>
   </section>
 
@@ -241,16 +247,17 @@ th{color:var(--muted)}
   </section>
 </div>
 
+<script src="frasa.js"></script>
 <script type="module">
 /* ================= KONFIGURASI ================= */
 const GAME_ID = 'pj2-kenal-kawasan';
 const firebaseConfig = {
-  apiKey: "TAMPAL_API_KEY_DI_SINI",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyA7cZ9GMsqqQNC_DBFs3RLqq1lqq5wk3Ko",
+  authDomain: "gamedb-ff80a.firebaseapp.com",
+  projectId: "gamedb-ff80a",
+  storageBucket: "gamedb-ff80a.firebasestorage.app",
+  messagingSenderId: "452316005",
+  appId: "1:452316005:web:a473ab1b408551930aaf8c"
 };
 /* =============================================== */
 
@@ -265,16 +272,10 @@ const KAWASAN = {
   berbatu:  { nama: 'Berbatu',  warna: '#7d7d7d' }
 };
 const K = Object.keys(KAWASAN);
-const PETUNJUK = [
-  { k: 'berumput', t: 'Ada rumput hijau yang lembut di kaki.' },
-  { k: 'berumput', t: 'Kita berjalan di padang yang hijau.' },
-  { k: 'berpasir', t: 'Kaki tenggelam sedikit dalam pasir halus.' },
-  { k: 'berpasir', t: 'Ada pantai dan kulit kerang.' },
-  { k: 'berair',   t: 'Kaki terasa basah dan sejuk.' },
-  { k: 'berair',   t: 'Bunyi kocak-kocak bila kaki melangkah.' },
-  { k: 'berbatu',  t: 'Tanah keras dan ada banyak batu.' },
-  { k: 'berbatu',  t: 'Langkah perlahan supaya tidak tersadung batu.' }
-];
+// Ayat & petunjuk datang dari frasa.js (dikongsi dengan rakam-suara.html)
+const FRASA = window.FRASA || {};
+const PETUNJUK = window.PETUNJUK || [];
+const PUJI = window.PUJI || ['Bagus!', 'Hebat!', 'Pandai!', 'Betul!'];
 const AVATAR = ['🐱', '🐶', '🐼', '🐰', '🦁', '🐸'];
 const JENIS = { A: 'Lihat gambar, pilih kawasan', B: 'Pilih gambar kawasan', C: 'Petunjuk, pilih kawasan' };
 
@@ -325,17 +326,66 @@ const IKON = {
   berbatu:  '<svg class="ik" viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#eeeae4"/><ellipse cx="17" cy="31" rx="9" ry="6" fill="#8f8f8f"/><ellipse cx="31" cy="30" rx="8" ry="7" fill="#7d7d7d"/><ellipse cx="25" cy="21" rx="7" ry="5" fill="#a3a3a3"/></svg>'
 };
 
-/* ---------- Bunyi & suara ---------- */
-let suara = null, ac = null;
-function pilihSuara() { const v = speechSynthesis.getVoices(); suara = v.find(x => /^ms/i.test(x.lang)) || v.find(x => /^id/i.test(x.lang)) || null; }
-if ('speechSynthesis' in window) { pilihSuara(); speechSynthesis.onvoiceschanged = pilihSuara; }
-function cakap(t) {
-  if (!st.bunyi || !('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(t);
-  u.lang = suara ? suara.lang : 'ms-MY'; if (suara) u.voice = suara; u.rate = .9;
+/* ---------- Suara: Bahasa Melayu SAHAJA ----------
+   Keutamaan: 1) rakaman guru audio/<kunci>.wav
+              2) suara pelayar Bahasa Melayu (ms / ms-MY)
+   Suara Indonesia (id) dan Inggeris TIDAK digunakan. Jika tiada, teks sahaja. */
+const AUDIO = {};
+let suaraMs = null, ac = null, giliran = 0, semasa = null;
+function pilihSuara() {
+  if (!('speechSynthesis' in window)) return;
+  const ms = speechSynthesis.getVoices().filter(v => /^ms([-_]|$)/i.test(v.lang));
+  suaraMs = ms.find(v => /natural|online|neural/i.test(v.name)) || ms.find(v => /google/i.test(v.name)) || ms[0] || null;
+  statusSuara();
+}
+async function semakRakaman() {
+  await Promise.all(Object.keys(FRASA).map(async k => {
+    try {
+      const r = await fetch(`audio/${k}.wav`, { method: 'HEAD', cache: 'no-cache' });
+      if (r.ok) { const el = new Audio(`audio/${k}.wav`); el.preload = 'auto'; AUDIO[k] = el; }
+    } catch (e) { /* fail tiada */ }
+  }));
+  statusSuara();
+}
+function statusSuara() {
+  const el = $('#status-suara'); if (!el) return;
+  const ada = Object.keys(AUDIO).length, jumlah = Object.keys(FRASA).length;
+  el.className = 'nota';
+  if (ada && ada === jumlah) { el.classList.add('ok'); el.textContent = '🔊 Suara: rakaman Bahasa Melayu guru (lengkap).'; }
+  else if (ada) { el.textContent = `🔊 Suara: rakaman guru ${ada}/${jumlah} ayat. Rakam baki ayat supaya semua soalan bersuara.`; }
+  else if (suaraMs) { el.classList.add('ok'); el.textContent = `🔊 Suara: ${suaraMs.name}.`; }
+  else { el.textContent = '🔇 Belum ada suara Bahasa Melayu. Soalan dipaparkan sebagai teks. Guru: rakam suara di rakam-suara.html.'; }
+}
+function henti() {
+  giliran++;
+  if (semasa) { semasa.pause(); semasa = null; }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+}
+function mainSatu(el, id) {
+  return new Promise(res => {
+    if (id !== giliran) return res();
+    semasa = el; el.currentTime = 0;
+    el.onended = el.onerror = () => res();
+    const p = el.play(); if (p) p.catch(() => res());
+  });
+}
+// kunci: satu kunci atau senarai kunci dari FRASA (dimainkan berturut-turut)
+async function sebut(kunci) {
+  const senarai = [].concat(kunci).filter(k => FRASA[k]);
+  if (!st.bunyi || !senarai.length) return;
+  henti(); const id = giliran;
+  if (senarai.every(k => AUDIO[k])) {
+    for (const k of senarai) { if (id !== giliran) return; await mainSatu(AUDIO[k], id); }
+    return;
+  }
+  if (!suaraMs) return;
+  const u = new SpeechSynthesisUtterance(senarai.map(k => FRASA[k]).join(' '));
+  u.voice = suaraMs; u.lang = suaraMs.lang; u.rate = .9;
   speechSynthesis.speak(u);
 }
+if ('speechSynthesis' in window) { pilihSuara(); speechSynthesis.onvoiceschanged = pilihSuara; }
+statusSuara();
+semakRakaman();
 function nada(f, jenis = 'sine', d = .14) {
   if (!st.bunyi) return;
   try {
@@ -436,7 +486,7 @@ $('#btn-mula').addEventListener('click', async () => {
   const nama = $('#nama').value.trim().replace(/\s+/g, ' ');
   const ralat = $('#ralat-mula');
   $('#btn-offline').style.display = 'none';
-  if (!nama) { ralat.textContent = 'Tulis nama samaran dahulu 🙂'; cakap('Tulis nama samaran dahulu'); $('#nama').focus(); return; }
+  if (!nama) { ralat.textContent = 'Tulis nama samaran dahulu 🙂'; sebut('tulis_nama'); $('#nama').focus(); return; }
   if (!/^[\p{L}\p{N} ._-]{1,20}$/u.test(nama)) { ralat.textContent = 'Guna huruf dan nombor sahaja.'; return; }
   ralat.textContent = ''; st.nama = nama;
   const btn = $('#btn-mula');
@@ -458,7 +508,7 @@ $('#btn-offline').addEventListener('click', () => { st.offline = true; $('#ralat
 
 $('#btn-bunyi').addEventListener('click', () => {
   st.bunyi = !st.bunyi; $('#btn-bunyi').textContent = st.bunyi ? '🔊' : '🔇';
-  if (!st.bunyi && 'speechSynthesis' in window) speechSynthesis.cancel();
+  if (!st.bunyi) henti();
 });
 
 /* ---------- Bina soalan ---------- */
@@ -468,7 +518,7 @@ function binaSoalan() {
   K.forEach(k => qs.push({ jenis: 'B', jawapan: k }));
   const p = kocok(PETUNJUK); const dipilih = [];
   for (const x of p) { if (!dipilih.some(d => d.k === x.k)) dipilih.push(x); if (dipilih.length === 2) break; }
-  dipilih.forEach(d => qs.push({ jenis: 'C', jawapan: d.k, petunjuk: d.t }));
+  dipilih.forEach(d => qs.push({ jenis: 'C', jawapan: d.k, petunjuk: d.t, kunci: d.kunci }));
   return kocok(qs).map(q => ({ ...q, pilihan: kocok(K) }));
 }
 
@@ -479,9 +529,9 @@ function mulaGame() {
   tunjuk('s-main'); papar();
 }
 function teksSoalan(q) {
-  if (q.jenis === 'A') return { html: 'Murid ini berjalan di kawasan <b>apa</b>?', suara: 'Murid ini berjalan di kawasan apa?' };
-  if (q.jenis === 'B') return { html: `Tekan gambar kawasan <b>${KAWASAN[q.jawapan].nama.toUpperCase()}</b>.`, suara: `Tekan gambar kawasan ${KAWASAN[q.jawapan].nama}.` };
-  return { html: 'Ini kawasan <b>apa</b>?', suara: `${q.petunjuk} Ini kawasan apa?` };
+  if (q.jenis === 'A') return { html: 'Murid ini berjalan di kawasan <b>apa</b>?', kunci: 'soalan_a' };
+  if (q.jenis === 'B') return { html: `Tekan gambar kawasan <b>${KAWASAN[q.jawapan].nama.toUpperCase()}</b>.`, kunci: 'soalan_b_' + q.jawapan };
+  return { html: 'Ini kawasan <b>apa</b>?', kunci: q.kunci };
 }
 function papar() {
   const q = st.soalan[st.i]; st.cubaan = 0; st.kunci = false; q.pilihanPertama = null;
@@ -497,9 +547,9 @@ function papar() {
     ? `<button class="opt tile" data-k="${k}" aria-label="Pilihan ${n + 1}">${adegan(k, false)}</button>`
     : `<button class="opt" data-k="${k}">${IKON[k]}<span>${KAWASAN[k].nama}</span></button>`).join('');
   $('#maklum').className = 'maklum';
-  cakap(t.suara);
+  sebut(t.kunci);
 }
-$('#btn-dengar').addEventListener('click', () => { const q = st.soalan[st.i]; if (q) cakap(teksSoalan(q).suara); });
+$('#btn-dengar').addEventListener('click', () => { const q = st.soalan[st.i]; if (q) sebut(teksSoalan(q).kunci); });
 $('#opsyen').addEventListener('click', e => { const b = e.target.closest('.opt'); if (b && !b.disabled) pilih(b); });
 
 function maklum(jenis, teks, adaNext) {
@@ -517,18 +567,18 @@ function pilih(btn) {
     const markah = st.cubaan === 0 ? 10 : 5;
     btn.classList.add('betul'); tutup(); bunyiBetul();
     st.rekod.push({ no: st.i + 1, jenis: q.jenis, kawasan: q.jawapan, pilihanPertama: q.pilihanPertama, betul: true, cubaan: st.cubaan + 1, markah });
-    const puji = ['Bagus!', 'Hebat!', 'Pandai!', 'Betul!'][Math.floor(Math.random() * 4)];
-    maklum('ok', `${puji} Kawasan ${nama} ✅`, true);
-    cakap(`${puji} Kawasan ${nama}.`);
+    const n = Math.floor(Math.random() * PUJI.length);
+    maklum('ok', `${PUJI[n]} Kawasan ${nama} ✅`, true);
+    sebut(['puji_' + (n + 1), 'kawasan_' + q.jawapan]);
   } else {
     st.cubaan++; btn.classList.add('salah'); btn.disabled = true; bunyiSalah();
-    if (st.cubaan === 1) { maklum('cuba', 'Hampir! Cuba sekali lagi 💪', false); cakap('Cuba lagi'); }
+    if (st.cubaan === 1) { maklum('cuba', 'Hampir! Cuba sekali lagi 💪', false); sebut('cuba_lagi'); }
     else {
       tutup();
       document.querySelector(`.opt[data-k="${q.jawapan}"]`).classList.add('betul');
       st.rekod.push({ no: st.i + 1, jenis: q.jenis, kawasan: q.jawapan, pilihanPertama: q.pilihanPertama, betul: false, cubaan: 0, markah: 0 });
       maklum('bad', `Jawapannya: kawasan ${nama}`, true);
-      cakap(`Jawapannya kawasan ${nama}.`);
+      sebut('jawapan_' + q.jawapan);
     }
   }
 }
@@ -561,7 +611,7 @@ async function tamat() {
   tunjuk('s-tamat');
   if (bintang === 3) konfeti();
   bunyiBetul();
-  cakap(`${mesej}, ${st.nama}! Markah kamu ${skor}.`);
+  setTimeout(() => sebut('tamat_' + bintang), 600);
 
   const sts = $('#status-simpan'); sts.className = 'status';
   if (st.offline) { sts.textContent = DEMO ? 'Mod demo: skor tidak disimpan ke database.' : 'Skor tidak disimpan (main tanpa log masuk).'; return; }

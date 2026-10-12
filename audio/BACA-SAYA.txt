@@ -1,0 +1,2 @@
+Letak fail suara .wav di sini (dari audio-jom-jalan.zip yang dimuat turun di rakam-suara.html).
+Nama fail mesti kekal, contoh: soalan_a.wav
